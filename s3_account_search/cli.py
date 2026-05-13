@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import sys
+import time
 from argparse import ArgumentParser
 from typing import Tuple, Optional
 
@@ -93,7 +94,10 @@ def run():
     bucket, key = to_s3_args(args.path)
     role_arn = args.role_arn
     enumerator = BucketEnumerator(session, bucket, key, role_arn)
+    start = time.monotonic()
     account_id = enumerator.get_account_id()
+    elapsed = time.monotonic() - start
+    print(f"Completed in {elapsed:.2f}s")
 
 
 def get_policy(digits: list):
