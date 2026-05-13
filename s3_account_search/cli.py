@@ -66,10 +66,7 @@ class BucketEnumerator():
     
     def find_next_digit(self, previous_digits: str, range: range):
         if len(range) == 1:
-            if self.can_access_in_range(previous_digits, range):
-                return previous_digits + str(range[0])
-            else:
-                print(f"Could not find next digit after {previous_digits}")
+            return previous_digits + str(range[0])
         else:
             first_half = range[:len(range) // 2]
             second_half = range[len(range) // 2:]
