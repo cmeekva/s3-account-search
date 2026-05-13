@@ -7,6 +7,76 @@ import boto3 as boto3
 from aws_assume_role_lib import assume_role
 from botocore.exceptions import ClientError
 
+class BucketEnumerator():
+    def __init__(self, session, bucket, key, role_arn):
+        self.session = session
+        self.bucket = bucket
+        self.key = key
+        self.role_arn = role_arn
+        self.digits = ""
+        if not self.can_access_with_policy({}):
+            print(f"{role_arn} cannot access {bucket}", file=sys.stderr)
+            exit(1)
+
+    def can_access_with_policy(self, policy: dict) -> bool:
+        if not policy:
+            assumed_role_session = assume_role(self.session, self.role_arn)
+        else:
+            assumed_role_session = assume_role(self.session, self.role_arn, Policy=policy)
+
+        s3 = assumed_role_session.client("s3")
+        if self.key:
+            try:
+                s3.head_object(Bucket=self.bucket, Key=self.key)
+                return True
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "403":
+                    pass  # try the next thing
+                else:
+                    raise
+        try:
+            s3.head_bucket(Bucket=self.bucket)
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "403":
+                pass  # continue to default return False
+            else:
+                raise
+        return False
+    
+    def get_account_id(self) -> str:
+        print("Starting search (this can take a while)")
+        
+        # do 12 iterations, so we never have an infinte loop
+        for _ in range(0, 12):
+            self.digits = self.find_next_digit(self.digits, range(0,10))
+            print(f"Found {self.digits}")
+
+        if len(self.digits) < 12:
+            print("Something went wrong, we couldn't  find all 12 digits")
+            exit(1)
+        return self.digits
+
+    def can_access_in_range(self, current_digits, range):
+        possible_numbers = [f"{current_digits}{i}" for i in range]
+        policy = get_policy(possible_numbers)
+        return self.can_access_with_policy(policy)
+    
+    
+    def find_next_digit(self, previous_digits: str, range: range):
+        if len(range) == 1:
+            if self.can_access_in_range(previous_digits, range):
+                return previous_digits + str(range[0])
+            else:
+                print(f"Could not find next digit after {previous_digits}")
+        else:
+            first_half = range[:len(range) // 2]
+            second_half = range[len(range) // 2:]
+            if self.can_access_in_range(previous_digits, first_half):
+                return self.find_next_digit(previous_digits, first_half)
+            else:
+                return self.find_next_digit(previous_digits, second_half)
+
 
 def run():
     parser = ArgumentParser()
@@ -22,29 +92,11 @@ def run():
     session = boto3.Session(profile_name=args.profile)
     bucket, key = to_s3_args(args.path)
     role_arn = args.role_arn
-
-    # try accessing the bucket without any restrictions
-    if not can_access_with_policy(session, bucket, key, role_arn, {}):
-        print(f"{role_arn} cannot access {bucket}", file=sys.stderr)
-        exit(1)
-
-    print("Starting search (this can take a while)")
-    digits = ""
-    # do 12 iterations, so we never have an infinte loop
-    for _ in range(0, 12):
-        for i in range(0, 10):
-            test = f"{digits}{i}"
-            policy = get_policy(test)
-            if can_access_with_policy(session, bucket, key, role_arn, policy):
-                print(f"found: {test}")
-                digits = test
-                break
-    if len(digits) < 12:
-        print("Something went wrong, we couldn't  find all 12 digits")
-        exit(1)
+    enumerator = BucketEnumerator(session, bucket, key, role_arn)
+    account_id = enumerator.get_account_id()
 
 
-def get_policy(digits: str):
+def get_policy(digits: list):
     return {
         "Version": "2012-10-17",
         "Statement": [
@@ -54,44 +106,11 @@ def get_policy(digits: str):
                 "Action": "s3:*",
                 "Resource": "*",
                 "Condition": {
-                    "StringLike": {"s3:ResourceAccount": [f"{digits}*"]},
+                    "StringLike": {"s3:ResourceAccount": [f"{digit}*" for digit in digits]},
                 },
             },
         ],
     }
-
-
-def can_access_with_policy(
-    session: boto3.session.Session,
-    bucket: str,
-    key: Optional[str],
-    role_arn: str,
-    policy: dict,
-):
-    if not policy:
-        assumed_role_session = assume_role(session, role_arn)
-    else:
-        assumed_role_session = assume_role(session, role_arn, Policy=policy)
-
-    s3 = assumed_role_session.client("s3")
-    if key:
-        try:
-            s3.head_object(Bucket=bucket, Key=key)
-            return True
-        except ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "403":
-                pass  # try the next thing
-            else:
-                raise
-    try:
-        s3.head_bucket(Bucket=bucket)
-        return True
-    except ClientError as e:
-        if e.response.get("Error", {}).get("Code") == "403":
-            pass  # continue to default return False
-        else:
-            raise
-    return False
 
 
 def to_s3_args(path: str) -> Tuple[str, Optional[str]]:
