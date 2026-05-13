@@ -3,6 +3,7 @@ import sys
 import time
 from argparse import ArgumentParser
 from typing import Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3 as boto3
 from aws_assume_role_lib import assume_role
@@ -50,7 +51,7 @@ class BucketEnumerator():
         
         # do 12 iterations, so we never have an infinte loop
         for _ in range(0, 12):
-            self.digits = self.find_next_digit(self.digits, range(0,10))
+            self.digits = self.digits + self.find_next_digit()
             print(f"Found {self.digits}")
 
         if len(self.digits) < 12:
@@ -58,22 +59,19 @@ class BucketEnumerator():
             exit(1)
         return self.digits
 
-    def can_access_in_range(self, current_digits, range):
-        possible_numbers = [f"{current_digits}{i}" for i in range]
-        policy = get_policy(possible_numbers)
+    def can_access_for_number(self, number):
+        policy = get_policy(f"{self.digits}{number}")
         return self.can_access_with_policy(policy)
     
-    
-    def find_next_digit(self, previous_digits: str, range: range):
-        if len(range) == 1:
-            return previous_digits + str(range[0])
-        else:
-            first_half = range[:len(range) // 2]
-            second_half = range[len(range) // 2:]
-            if self.can_access_in_range(previous_digits, first_half):
-                return self.find_next_digit(previous_digits, first_half)
-            else:
-                return self.find_next_digit(previous_digits, second_half)
+    def find_next_digit(self):
+        executor = ThreadPoolExecutor(max_workers=10)
+        futures = {executor.submit(self.can_access_for_number, job): job for job in range(10)}
+        for future in as_completed(futures):
+            if future.result() is True:
+                executor.shutdown(wait=False, cancel_futures=True)
+                return str(futures[future])
+
+        executor.shutdown(wait=False)
 
 
 def run():
@@ -97,7 +95,7 @@ def run():
     print(f"Completed in {elapsed:.2f}s")
 
 
-def get_policy(digits: list):
+def get_policy(digit: list):
     return {
         "Version": "2012-10-17",
         "Statement": [
@@ -107,7 +105,7 @@ def get_policy(digits: list):
                 "Action": "s3:*",
                 "Resource": "*",
                 "Condition": {
-                    "StringLike": {"s3:ResourceAccount": [f"{digit}*" for digit in digits]},
+                    "StringLike": {"s3:ResourceAccount": [f"{digit}*"]},
                 },
             },
         ],
