@@ -60,7 +60,7 @@ class AccountEnumerator():
         return self.digits
 
     def can_access_for_number(self, number):
-        policy = get_policy(f"{self.digits}{number}")
+        policy = self.get_policy(str(number))
         return self.can_access_with_policy(policy)
     
     def find_next_digit(self):
@@ -73,6 +73,33 @@ class AccountEnumerator():
 
         executor.shutdown(wait=False)
 
+    def get_policy(self, digit: str):
+        return {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "AllowResourceAccount",
+                    "Effect": "Allow",
+                    "Action": "s3:*",
+                    "Resource": "*",
+                    "Condition": {
+                        "StringLike": {"s3:ResourceAccount": [f"{self.digits}{digit}*"]},
+                    },
+                },
+            ],
+        }
+
+
+def to_s3_args(path: str) -> Tuple[str, Optional[str]]:
+    if path.startswith("s3://"):
+        path = path[5:]
+    assert path, "no bucket name provided"
+
+    parts = path.split("/")
+    if len(parts) > 1:
+        return parts[0], "/".join(parts[1:])
+    # exactly 1 part
+    return parts[0], None
 
 def run():
     parser = ArgumentParser()
@@ -88,41 +115,11 @@ def run():
     session = boto3.Session(profile_name=args.profile)
     bucket, key = to_s3_args(args.path)
     role_arn = args.role_arn
-    enumerator = AccountEnumerator(session, bucket, key, role_arn)
     start = time.monotonic()
+    enumerator = AccountEnumerator(session, bucket, key, role_arn)
     enumerator.get_account_id()
     elapsed = time.monotonic() - start
     print(f"Completed in {elapsed:.2f}s")
-
-
-def get_policy(digit: list):
-    return {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "AllowResourceAccount",
-                "Effect": "Allow",
-                "Action": "s3:*",
-                "Resource": "*",
-                "Condition": {
-                    "StringLike": {"s3:ResourceAccount": [f"{digit}*"]},
-                },
-            },
-        ],
-    }
-
-
-def to_s3_args(path: str) -> Tuple[str, Optional[str]]:
-    if path.startswith("s3://"):
-        path = path[5:]
-    assert path, "no bucket name provided"
-
-    parts = path.split("/")
-    if len(parts) > 1:
-        return parts[0], "/".join(parts[1:])
-    # exactly 1 part
-    return parts[0], None
-
 
 if __name__ == "__main__":
     run()
