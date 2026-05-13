@@ -9,7 +9,7 @@ import boto3 as boto3
 from aws_assume_role_lib import assume_role
 from botocore.exceptions import ClientError
 
-class BucketEnumerator():
+class AccountEnumerator():
     def __init__(self, session, bucket, key, role_arn):
         self.session = session
         self.bucket = bucket
@@ -88,7 +88,7 @@ def run():
     session = boto3.Session(profile_name=args.profile)
     bucket, key = to_s3_args(args.path)
     role_arn = args.role_arn
-    enumerator = BucketEnumerator(session, bucket, key, role_arn)
+    enumerator = AccountEnumerator(session, bucket, key, role_arn)
     start = time.monotonic()
     account_id = enumerator.get_account_id()
     elapsed = time.monotonic() - start
