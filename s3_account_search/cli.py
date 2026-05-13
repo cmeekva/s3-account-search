@@ -90,7 +90,7 @@ def run():
     role_arn = args.role_arn
     enumerator = AccountEnumerator(session, bucket, key, role_arn)
     start = time.monotonic()
-    account_id = enumerator.get_account_id()
+    enumerator.get_account_id()
     elapsed = time.monotonic() - start
     print(f"Completed in {elapsed:.2f}s")
 
